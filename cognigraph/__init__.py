@@ -26,4 +26,5 @@ __all__ = [
     "vector_store",
     "retriever",
     "pipeline",
+    "episodic_buffer",
 ]

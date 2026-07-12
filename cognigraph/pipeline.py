@@ -6,13 +6,14 @@
 import hashlib
 import logging
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 import numpy as np
 from cognigraph.config import settings
 from cognigraph.extractor import RuleBasedExtractor
 from cognigraph.graph_store import NetworkXGraphStore
 from cognigraph.models import ChatMessage, Entity, ExtractionResult
 from cognigraph.vector_store import SimpleVectorStore
+from cognigraph.episodic_buffer import EpisodicBuffer
 
 logger = logging.getLogger("cognigraph.pipeline")
 
@@ -58,7 +59,8 @@ class ConsolidationPipeline:
         graph_store: NetworkXGraphStore,
         vector_store: SimpleVectorStore,
         extractor: RuleBasedExtractor,
-        embedder: MockEmbedder
+        embedder: MockEmbedder,
+        episodic_buffer: Optional[EpisodicBuffer] = None
     ) -> None:
         """Initializes the pipeline.
 
@@ -67,11 +69,13 @@ class ConsolidationPipeline:
             vector_store: The vector storage instance.
             extractor: The entity-relationship extractor.
             embedder: The embedding generator.
+            episodic_buffer: Optional episodic buffer instance.
         """
         self.graph_store = graph_store
         self.vector_store = vector_store
         self.extractor = extractor
         self.embedder = embedder
+        self.episodic_buffer = episodic_buffer
         logger.info("ConsolidationPipeline initialized")
 
     def ingest_and_process(self, messages: List[ChatMessage]) -> ExtractionResult:
@@ -84,6 +88,11 @@ class ConsolidationPipeline:
             The ExtractionResult containing the extracted entities and relationships.
         """
         logger.info("Processing %d messages in pipeline", len(messages))
+
+        # If episodic buffer is available, store them first
+        stored_ids = []
+        if self.episodic_buffer:
+            stored_ids = self.episodic_buffer.add_messages(messages)
 
         # 1. Extract entities and relationships
         extraction_result = self.extractor.extract(messages)
@@ -105,18 +114,58 @@ class ConsolidationPipeline:
         for relationship in extraction_result.relationships:
             self.graph_store.add_relationship(relationship)
 
+        # Mark as processed in episodic buffer
+        if self.episodic_buffer and stored_ids:
+            self.episodic_buffer.mark_as_processed(stored_ids)
+
         logger.info("Ingestion and processing complete")
         return extraction_result
 
     def consolidate(self) -> None:
         """Performs memory consolidation.
 
-        1. Decays relationship weights based on recency.
-        2. Merges highly similar entities (based on name similarity or vector similarity).
+        1. Consolidates unprocessed messages from the episodic buffer if available.
+        2. Decays relationship weights based on recency.
+        3. Merges highly similar entities (based on name similarity or vector similarity).
         """
         logger.info("Starting memory consolidation loop")
 
-        # 1. Decay relationship weights
+        # 1. Process any unprocessed messages in the episodic buffer
+        if self.episodic_buffer:
+            unprocessed = self.episodic_buffer.get_messages(unprocessed_only=True)
+            if unprocessed:
+                logger.info("Consolidating %d unprocessed messages from episodic buffer", len(unprocessed))
+                # Convert StoredMessage to ChatMessage for processing
+                chat_messages = [
+                    ChatMessage(
+                        role=msg.role,
+                        content=msg.content,
+                        timestamp=msg.timestamp,
+                        metadata=msg.metadata
+                    )
+                    for msg in unprocessed
+                ]
+                # Extract and store facts directly without re-adding to episodic buffer
+                extraction_result = self.extractor.extract(chat_messages)
+
+                for entity in extraction_result.entities:
+                    self.graph_store.add_entity(entity)
+                    embedding_text = f"{entity.name}: {entity.description}"
+                    vector = self.embedder.embed_text(embedding_text)
+                    self.vector_store.add_vector(
+                        vector_id=entity.id,
+                        vector=vector,
+                        metadata={"name": entity.name, "type": entity.type}
+                    )
+
+                for relationship in extraction_result.relationships:
+                    self.graph_store.add_relationship(relationship)
+
+                # Mark the original messages as processed
+                msg_ids = [msg.id for msg in unprocessed]
+                self.episodic_buffer.mark_as_processed(msg_ids)
+
+        # 2. Decay relationship weights
         decay_factor = settings.RECENCY_DECAY_FACTOR
         for u, v, key, data in list(self.graph_store.graph.edges(keys=True, data=True)):
             current_weight = data.get("weight", 1.0)
@@ -125,9 +174,7 @@ class ConsolidationPipeline:
             self.graph_store.graph[u][v][key]["updated_at"] = datetime.utcnow().isoformat()
             logger.debug("Decayed relationship weight: %s -[%s]-> %s to %f", u, key, v, new_weight)
 
-        # 2. Merge duplicate entities (simple name-based consolidation for scaffolding)
-        # In a real system, this would use vector similarity or LLM-based resolution.
-        # Let's find entities with very similar names (e.g., case-insensitive match)
+        # 3. Merge duplicate entities (simple name-based consolidation for scaffolding)
         nodes = list(self.graph_store.graph.nodes(data=True))
         merged_count = 0
 

@@ -4,7 +4,7 @@
 """Data models for CogniGraph memory engine."""
 
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -40,6 +40,18 @@ class ChatMessage(BaseModel):
     content: str = Field(..., description="Text content of the message")
     timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the message")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata (e.g., session_id, user_id)")
+
+
+class StoredMessage(BaseModel):
+    """Represents a chat message stored in the episodic buffer with processing metadata."""
+
+    id: str = Field(..., description="Unique identifier for the stored message")
+    role: str = Field(..., description="Role of the speaker (e.g., user, assistant, system)")
+    content: str = Field(..., description="Text content of the message")
+    timestamp: datetime = Field(default_factory=datetime.utcnow, description="Timestamp of the message")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata (e.g., session_id, user_id)")
+    processed: bool = Field(default=False, description="Whether this message has been consolidated into the knowledge graph")
+    processed_at: Optional[datetime] = Field(default=None, description="Timestamp when this message was consolidated")
 
 
 class ExtractionResult(BaseModel):

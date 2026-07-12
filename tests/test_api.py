@@ -15,6 +15,7 @@ def test_api_status() -> None:
     data = response.json()
     assert "graph" in data
     assert "vector_store" in data
+    assert "episodic_buffer" in data
 
 
 def test_api_ingest_and_retrieve() -> None:
@@ -49,5 +50,49 @@ def test_api_ingest_and_retrieve() -> None:
 
     # Consolidate
     response = client.post("/consolidate")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+
+def test_api_episodic_endpoints() -> None:
+    """Tests the episodic buffer endpoints (/episodes, /episodes/processed)."""
+    client = TestClient(app)
+
+    # Ingest into episodic buffer
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": "Eve works at Netflix.",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "metadata": {"session_id": "session_eve"}
+            }
+        ]
+    }
+    response = client.post("/episodes", json=payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert "message_ids" in data
+    assert len(data["message_ids"]) == 1
+    msg_id = data["message_ids"][0]
+
+    # Get episodes (unprocessed)
+    response = client.get("/episodes?unprocessed_only=true")
+    assert response.status_code == 200
+    episodes = response.json()
+    assert len(episodes) >= 1
+    assert any(ep.get("id") == msg_id for ep in episodes)
+
+    # Consolidate to process the episodes
+    response = client.post("/consolidate")
+    assert response.status_code == 200
+
+    # Get episodes (unprocessed should be empty now for this session)
+    response = client.get("/episodes?session_id=session_eve&unprocessed_only=true")
+    assert response.status_code == 200
+    assert len(response.json()) == 0
+
+    # Clear processed episodes
+    response = client.request("DELETE", "/episodes/processed")
     assert response.status_code == 200
     assert response.json()["status"] == "success"

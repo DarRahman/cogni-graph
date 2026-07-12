@@ -22,6 +22,7 @@ class Settings(BaseSettings):
     DATA_DIR: str = "./data"
     VECTOR_DB_PATH: str = "./data/vector_store.json"
     GRAPH_DB_PATH: str = "./data/graph_store.json"
+    EPISODIC_DB_PATH: str = "./data/episodic_store.json"
 
     # LLM & Embedding configuration (for future integration, but configured now)
     LLM_MODEL: str = "gpt-4-turbo"
