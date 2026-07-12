@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel
 from cognigraph.config import settings
-from cognigraph.extractor import RuleBasedExtractor
+from cognigraph.extractor import InstructorExtractor, RuleBasedExtractor
 from cognigraph.graph_store import NetworkXGraphStore
 from cognigraph.models import ChatMessage, ExtractionResult, RetrievalResult, StoredMessage
 from cognigraph.pipeline import ConsolidationPipeline, MockEmbedder
@@ -29,7 +29,15 @@ app = FastAPI(
 graph_store = NetworkXGraphStore()
 vector_store = SimpleVectorStore()
 episodic_buffer = EpisodicBuffer()
-extractor = RuleBasedExtractor()
+
+# Dynamically choose extractor based on configuration
+if settings.OPENAI_API_KEY:
+    logger.info("Initializing InstructorExtractor for API")
+    extractor = InstructorExtractor()
+else:
+    logger.warning("COGNIGRAPH_OPENAI_API_KEY not set. Falling back to RuleBasedExtractor.")
+    extractor = RuleBasedExtractor()
+
 embedder = MockEmbedder(dimension=settings.EMBEDDING_DIMENSION)
 pipeline = ConsolidationPipeline(graph_store, vector_store, extractor, embedder, episodic_buffer)
 retriever = HybridRetriever(graph_store, vector_store)
@@ -41,7 +49,7 @@ class IngestRequest(BaseModel):
 
 
 class IngestEpisodesResponse(BaseModel):
-    """Response model for ingesting raw chat messages."""
+    """Request model for ingesting raw chat messages."""
     message_ids: List[str]
 
 

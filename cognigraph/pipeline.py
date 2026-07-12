@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import List, Optional
 import numpy as np
 from cognigraph.config import settings
-from cognigraph.extractor import RuleBasedExtractor
+from cognigraph.extractor import Extractor
 from cognigraph.graph_store import NetworkXGraphStore
 from cognigraph.models import ChatMessage, Entity, ExtractionResult
 from cognigraph.vector_store import SimpleVectorStore
@@ -58,7 +58,7 @@ class ConsolidationPipeline:
         self,
         graph_store: NetworkXGraphStore,
         vector_store: SimpleVectorStore,
-        extractor: RuleBasedExtractor,
+        extractor: Extractor,
         embedder: MockEmbedder,
         episodic_buffer: Optional[EpisodicBuffer] = None
     ) -> None:

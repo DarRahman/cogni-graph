@@ -4,6 +4,7 @@
 """Configuration management for CogniGraph using Pydantic Settings."""
 
 import logging
+from typing import Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger("cognigraph.config")
@@ -28,6 +29,8 @@ class Settings(BaseSettings):
     LLM_MODEL: str = "gpt-4-turbo"
     EMBEDDING_MODEL: str = "text-embedding-3-small"
     EMBEDDING_DIMENSION: int = 1536
+    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_BASE: Optional[str] = None
 
     # Consolidation parameters
     CONSOLIDATION_INTERVAL_SECONDS: int = 3600
