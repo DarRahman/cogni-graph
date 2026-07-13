@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from cognigraph.config import settings
 from cognigraph.extractor import InstructorExtractor, RuleBasedExtractor
 from cognigraph.graph_store import NetworkXGraphStore
+from cognigraph.neo4j_store import Neo4jGraphStore
 from cognigraph.models import ChatMessage, ExtractionResult, RetrievalResult, StoredMessage
 from cognigraph.pipeline import ConsolidationPipeline, MockEmbedder
 from cognigraph.retriever import HybridRetriever
@@ -26,17 +27,28 @@ app = FastAPI(
 )
 
 # Initialize components
-graph_store = NetworkXGraphStore()
+if settings.USE_NEO4J:
+    logger.info("Initializing Neo4jGraphStore for API")
+    graph_store = Neo4jGraphStore(
+        uri=settings.NEO4J_URI,
+        user=settings.NEO4J_USER,
+        password=settings.NEO4J_PASSWORD,
+        database=settings.NEO4J_DATABASE
+    )
+else:
+    logger.info("Initializing NetworkXGraphStore for API")
+    graph_store = NetworkXGraphStore()  # type: ignore[assignment]
+
 vector_store = SimpleVectorStore()
 episodic_buffer = EpisodicBuffer()
 
 # Dynamically choose extractor based on configuration
 if settings.OPENAI_API_KEY:
     logger.info("Initializing InstructorExtractor for API")
-    extractor = InstructorExtractor()
+    extractor = InstructorExtractor()  # type: ignore[assignment]
 else:
     logger.warning("COGNIGRAPH_OPENAI_API_KEY not set. Falling back to RuleBasedExtractor.")
-    extractor = RuleBasedExtractor()
+    extractor = RuleBasedExtractor()  # type: ignore[assignment]
 
 embedder = MockEmbedder(dimension=settings.EMBEDDING_DIMENSION)
 pipeline = ConsolidationPipeline(graph_store, vector_store, extractor, embedder, episodic_buffer)
@@ -76,6 +88,8 @@ def shutdown_event() -> None:
     graph_store.save_to_disk(settings.GRAPH_DB_PATH)
     vector_store.save_to_disk(settings.VECTOR_DB_PATH)
     episodic_buffer.save_to_disk(settings.EPISODIC_DB_PATH)
+    if hasattr(graph_store, "close"):
+        graph_store.close()  # type: ignore[attr-defined]
 
 
 @app.post("/ingest", response_model=ExtractionResult)
@@ -163,10 +177,18 @@ def trigger_consolidation() -> Dict[str, str]:
 def get_status() -> Dict[str, Any]:
     """Returns the status of the memory stores."""
     unprocessed_count = len(episodic_buffer.get_messages(unprocessed_only=True))
+    # Safely get node/edge count depending on store type
+    if isinstance(graph_store, NetworkXGraphStore):
+        nodes_count = graph_store.graph.number_of_nodes()
+        edges_count = graph_store.graph.number_of_edges()
+    else:
+        nodes_count = len(graph_store.get_all_entities())
+        edges_count = len(graph_store.get_all_relationships())
+        
     return {
         "graph": {
-            "nodes_count": graph_store.graph.number_of_nodes(),
-            "edges_count": graph_store.graph.number_of_edges()
+            "nodes_count": nodes_count,
+            "edges_count": edges_count
         },
         "vector_store": {
             "vectors_count": len(vector_store.vectors)

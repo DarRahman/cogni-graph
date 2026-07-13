@@ -29,6 +29,27 @@ def test_add_and_get_entity() -> None:
     assert retrieved.description == "A software engineer"
 
 
+def test_get_all_entities() -> None:
+    """Tests retrieving all entities from the graph store."""
+    store = NetworkXGraphStore()
+    store.add_entity(Entity(id="alice", name="Alice", type="Person"))
+    store.add_entity(Entity(id="bob", name="Bob", type="Person"))
+    
+    entities = store.get_all_entities()
+    assert len(entities) == 2
+    assert {e.id for e in entities} == {"alice", "bob"}
+
+
+def test_remove_entity() -> None:
+    """Tests removing an entity from the graph store."""
+    store = NetworkXGraphStore()
+    store.add_entity(Entity(id="alice", name="Alice", type="Person"))
+    assert store.get_entity("alice") is not None
+    
+    store.remove_entity("alice")
+    assert store.get_entity("alice") is None
+
+
 def test_add_and_get_relationship() -> None:
     """Tests adding and retrieving relationships from the graph store."""
     store = NetworkXGraphStore()
@@ -47,6 +68,38 @@ def test_add_and_get_relationship() -> None:
     assert relationships[0].source == "alice"
     assert relationships[0].target == "google"
     assert relationships[0].type == "WORKS_AT"
+
+
+def test_get_all_relationships() -> None:
+    """Tests retrieving all relationships from the graph store."""
+    store = NetworkXGraphStore()
+    store.add_relationship(Relationship(source="alice", target="google", type="WORKS_AT"))
+    store.add_relationship(Relationship(source="bob", target="microsoft", type="WORKS_AT"))
+    
+    rels = store.get_all_relationships()
+    assert len(rels) == 2
+
+
+def test_remove_relationship() -> None:
+    """Tests removing a relationship from the graph store."""
+    store = NetworkXGraphStore()
+    store.add_relationship(Relationship(source="alice", target="google", type="WORKS_AT"))
+    assert len(store.get_relationships("alice")) == 1
+    
+    store.remove_relationship("alice", "google", "WORKS_AT")
+    assert len(store.get_relationships("alice")) == 0
+
+
+def test_get_degree() -> None:
+    """Tests getting the degree of an entity."""
+    store = NetworkXGraphStore()
+    store.add_relationship(Relationship(source="alice", target="google", type="WORKS_AT"))
+    store.add_relationship(Relationship(source="bob", target="alice", type="KNOWS"))
+    
+    assert store.get_degree("alice") == 2
+    assert store.get_degree("google") == 1
+    assert store.get_degree("bob") == 1
+    assert store.get_degree("nonexistent") == 0
 
 
 def test_merge_entities() -> None:

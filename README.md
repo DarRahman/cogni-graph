@@ -8,7 +8,7 @@ CogniGraph is a production-grade, long-term memory consolidation engine designed
 ## Backlog
 - [x] Setup project scaffolding with Poetry, strict typing (mypy), and unit testing suite (pytest).
 - [x] Implement the Episodic Memory Buffer to ingest and store raw chat interactions with metadata.
-- [ ] Build the Entity-Relation Extraction Engine using LangChain/Instructor to extract structured facts from dialogue.
+- [x] Build the Entity-Relation Extraction Engine using LangChain/Instructor to extract structured facts from dialogue.
 - [ ] Develop the Graph Consolidation Pipeline using NetworkX/Neo4j to merge entities, resolve duplicates, and update edge weights based on recency and frequency.
 - [ ] Create the Hybrid Retriever combining vector similarity search (Chroma/Qdrant) and graph traversal algorithms.
 - [ ] Design a LangGraph workflow to orchestrate the asynchronous consolidation loop (compaction, pruning, and forgetting).

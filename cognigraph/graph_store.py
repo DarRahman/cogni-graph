@@ -1,17 +1,74 @@
 # cognigraph/graph_store.py - Stateful long-term memory engine for LLM agents using hybrid vector-graph consolidation and hierarchical entity-relation extraction.
 # Contributed by Claude Code
 
-"""Graph storage engine using NetworkX."""
+"""Graph storage engine interface and NetworkX implementation."""
 
 from datetime import datetime
 import json
 import logging
 import os
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Protocol, runtime_checkable
 import networkx as nx
 from cognigraph.models import Entity, Relationship
 
 logger = logging.getLogger("cognigraph.graph_store")
+
+
+@runtime_checkable
+class GraphStore(Protocol):
+    """Protocol defining the interface for graph storage engines."""
+
+    def add_entity(self, entity: Entity) -> None:
+        """Adds or updates an entity in the graph."""
+        ...
+
+    def get_entity(self, entity_id: str) -> Optional[Entity]:
+        """Retrieves an entity by its ID."""
+        ...
+
+    def get_all_entities(self) -> List[Entity]:
+        """Retrieves all entities in the graph."""
+        ...
+
+    def remove_entity(self, entity_id: str) -> None:
+        """Removes an entity and all its connected edges from the graph."""
+        ...
+
+    def add_relationship(self, relationship: Relationship) -> None:
+        """Adds or updates a relationship in the graph."""
+        ...
+
+    def get_relationships(self, source_id: str) -> List[Relationship]:
+        """Retrieves all outgoing relationships from a source entity."""
+        ...
+
+    def get_all_relationships(self) -> List[Relationship]:
+        """Retrieves all relationships in the graph."""
+        ...
+
+    def remove_relationship(self, source: str, target: str, type: str) -> None:
+        """Removes a specific relationship from the graph."""
+        ...
+
+    def get_neighbors(self, entity_id: str) -> List[Tuple[Entity, Relationship]]:
+        """Retrieves neighboring entities and the connecting relationships."""
+        ...
+
+    def get_degree(self, entity_id: str) -> int:
+        """Returns the degree (number of connections) of an entity."""
+        ...
+
+    def merge_entities(self, entity_id_1: str, entity_id_2: str, merged_entity: Entity) -> None:
+        """Merges two entities into a single entity, re-routing all edges."""
+        ...
+
+    def save_to_disk(self, path: str) -> None:
+        """Saves the graph to disk (if supported)."""
+        ...
+
+    def load_from_disk(self, path: str) -> None:
+        """Loads the graph from disk (if supported)."""
+        ...
 
 
 class NetworkXGraphStore:
@@ -35,6 +92,47 @@ class NetworkXGraphStore:
 
         self.graph.add_node(entity.id, **node_attrs)
         logger.debug("Added/updated entity: %s", entity.id)
+
+    def get_entity(self, entity_id: str) -> Optional[Entity]:
+        """Retrieves an entity by its ID.
+
+        Args:
+            entity_id: The ID of the entity.
+
+        Returns:
+            The Entity model if found, else None.
+        """
+        if not self.graph.has_node(entity_id):
+            return None
+        node_data = self.graph.nodes[entity_id].copy()
+        if isinstance(node_data.get("created_at"), str):
+            node_data["created_at"] = datetime.fromisoformat(node_data["created_at"])
+        if isinstance(node_data.get("updated_at"), str):
+            node_data["updated_at"] = datetime.fromisoformat(node_data["updated_at"])
+        return Entity(**node_data)
+
+    def get_all_entities(self) -> List[Entity]:
+        """Retrieves all entities in the graph.
+
+        Returns:
+            A list of all Entity models.
+        """
+        entities = []
+        for node_id in self.graph.nodes:
+            entity = self.get_entity(node_id)
+            if entity:
+                entities.append(entity)
+        return entities
+
+    def remove_entity(self, entity_id: str) -> None:
+        """Removes an entity and all its connected edges from the graph.
+
+        Args:
+            entity_id: The ID of the entity to remove.
+        """
+        if self.graph.has_node(entity_id):
+            self.graph.remove_node(entity_id)
+            logger.info("Removed entity: %s", entity_id)
 
     def add_relationship(self, relationship: Relationship) -> None:
         """Adds or updates a relationship in the graph.
@@ -76,24 +174,6 @@ class NetworkXGraphStore:
             self.graph.add_edge(source, target, key=rel_type, **edge_attrs)
             logger.debug("Added new relationship: %s -[%s]-> %s", source, rel_type, target)
 
-    def get_entity(self, entity_id: str) -> Optional[Entity]:
-        """Retrieves an entity by its ID.
-
-        Args:
-            entity_id: The ID of the entity.
-
-        Returns:
-            The Entity model if found, else None.
-        """
-        if not self.graph.has_node(entity_id):
-            return None
-        node_data = self.graph.nodes[entity_id].copy()
-        if isinstance(node_data.get("created_at"), str):
-            node_data["created_at"] = datetime.fromisoformat(node_data["created_at"])
-        if isinstance(node_data.get("updated_at"), str):
-            node_data["updated_at"] = datetime.fromisoformat(node_data["updated_at"])
-        return Entity(**node_data)
-
     def get_relationships(self, source_id: str) -> List[Relationship]:
         """Retrieves all outgoing relationships from a source entity.
 
@@ -116,6 +196,34 @@ class NetworkXGraphStore:
                     data["updated_at"] = datetime.fromisoformat(data["updated_at"])
                 relationships.append(Relationship(**data))
         return relationships
+
+    def get_all_relationships(self) -> List[Relationship]:
+        """Retrieves all relationships in the graph.
+
+        Returns:
+            A list of all Relationship models.
+        """
+        relationships = []
+        for u, v, key, data in self.graph.edges(keys=True, data=True):
+            edge_data = data.copy()
+            if isinstance(edge_data.get("created_at"), str):
+                edge_data["created_at"] = datetime.fromisoformat(edge_data["created_at"])
+            if isinstance(edge_data.get("updated_at"), str):
+                edge_data["updated_at"] = datetime.fromisoformat(edge_data["updated_at"])
+            relationships.append(Relationship(**edge_data))
+        return relationships
+
+    def remove_relationship(self, source: str, target: str, type: str) -> None:
+        """Removes a specific relationship from the graph.
+
+        Args:
+            source: The source entity ID.
+            target: The target entity ID.
+            type: The relationship type.
+        """
+        if self.graph.has_edge(source, target, key=type):
+            self.graph.remove_edge(source, target, key=type)
+            logger.info("Removed relationship: %s -[%s]-> %s", source, type, target)
 
     def get_neighbors(self, entity_id: str) -> List[Tuple[Entity, Relationship]]:
         """Retrieves neighboring entities and the connecting relationships.
@@ -156,6 +264,19 @@ class NetworkXGraphStore:
 
         return neighbors
 
+    def get_degree(self, entity_id: str) -> int:
+        """Returns the degree (number of connections) of an entity.
+
+        Args:
+            entity_id: The ID of the entity.
+
+        Returns:
+            The degree of the entity.
+        """
+        if not self.graph.has_node(entity_id):
+            return 0
+        return int(self.graph.degree(entity_id))
+
     def merge_entities(self, entity_id_1: str, entity_id_2: str, merged_entity: Entity) -> None:
         """Merges two entities into a single entity.
 
@@ -167,6 +288,9 @@ class NetworkXGraphStore:
             entity_id_2: The ID of the second entity (to be merged and removed).
             merged_entity: The new Entity model representing the merged entity.
         """
+        if entity_id_1 == entity_id_2:
+            return
+
         logger.info("Merging entity %s into %s", entity_id_2, entity_id_1)
 
         if not self.graph.has_node(entity_id_1) or not self.graph.has_node(entity_id_2):

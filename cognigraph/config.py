@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     CONSOLIDATION_INTERVAL_SECONDS: int = 3600
     RECENCY_DECAY_FACTOR: float = 0.95  # Decay factor for relationship weights
     SIMILARITY_THRESHOLD: float = 0.85  # Threshold for entity merging
+    PRUNING_THRESHOLD: float = 0.1  # Threshold below which edges are pruned
+
+    # Neo4j configuration
+    NEO4J_URI: str = "bolt://localhost:7687"
+    NEO4J_USER: str = "neo4j"
+    NEO4J_PASSWORD: str = "password"
+    NEO4J_DATABASE: str = "neo4j"
+    USE_NEO4J: bool = False
 
     # API configuration
     API_HOST: str = "0.0.0.0"

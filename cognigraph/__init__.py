@@ -23,6 +23,7 @@ __all__ = [
     "models",
     "extractor",
     "graph_store",
+    "neo4j_store",
     "vector_store",
     "retriever",
     "pipeline",

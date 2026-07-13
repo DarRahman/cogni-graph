@@ -76,9 +76,18 @@ def test_consolidation_decay_and_merge() -> None:
     ]
     pipeline.ingest_and_process(messages)
 
+    # Manually backdate the relationships in the graph to simulate passage of time
+    for rel in graph_store.get_all_relationships():
+        graph_store.remove_relationship(rel.source, rel.target, rel.type)
+        from datetime import timedelta
+        rel.updated_at = datetime.utcnow() - timedelta(days=1)
+        graph_store.add_relationship(rel)
+
     # Verify initial state
     assert graph_store.graph.has_node("charlie")
     initial_weight = graph_store.get_relationships("charlie")[0].weight
+    # Note: add_relationship increments weight if it exists, but we backdated it, let's assert it's 1.0 or check what weight it has
+    # In NetworkXGraphStore, adding a relationship that exists increments weight. But here we removed and re-added. So it should be 1.0.
     assert initial_weight == 1.0
 
     # Run consolidation
