@@ -96,3 +96,40 @@ def test_api_episodic_endpoints() -> None:
     response = client.request("DELETE", "/episodes/processed")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
+
+
+def test_api_workflow_consolidation() -> None:
+    """Tests the LangGraph workflow consolidation endpoint."""
+    client = TestClient(app)
+
+    # Ingest into episodic buffer
+    payload = {
+        "messages": [
+            {
+                "role": "user",
+                "content": "Frank works at Microsoft.",
+                "timestamp": "2024-01-01T00:00:00Z",
+                "metadata": {"session_id": "session_frank"}
+            }
+        ]
+    }
+    response = client.post("/episodes", json=payload)
+    assert response.status_code == 200
+
+    # Run workflow consolidation
+    workflow_payload = {
+        "session_id": "session_frank",
+        "decay_factor": 0.95,
+        "pruning_threshold": 0.1,
+        "similarity_threshold": 0.85,
+        "forgetting_age_days": 30.0
+    }
+    response = client.post("/consolidate/workflow", json=workflow_payload)
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "success"
+    assert data["merged_entities_count"] >= 0
+    assert data["pruned_relationships_count"] >= 0
+    assert data["forgotten_entities_count"] >= 0
+    assert "started_at" in data
+    assert "completed_at" in data

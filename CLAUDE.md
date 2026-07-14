@@ -1,7 +1,8 @@
 # CLAUDE.md
 
 ## Development Commands
-* Run application: `python app.py` (or correct command for language)
+* Run API: `python -m cognigraph.api`
+* Run CLI: `python -m cognigraph.cli`
 * Run tests: `pytest`
 * Lint/Format: `ruff check .`
 

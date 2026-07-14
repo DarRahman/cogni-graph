@@ -28,4 +28,6 @@ __all__ = [
     "retriever",
     "pipeline",
     "episodic_buffer",
+    "consolidation_graph",
+    "cli",
 ]

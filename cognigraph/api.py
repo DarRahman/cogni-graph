@@ -17,6 +17,7 @@ from cognigraph.pipeline import ConsolidationPipeline, MockEmbedder
 from cognigraph.retriever import HybridRetriever
 from cognigraph.vector_store import SimpleVectorStore
 from cognigraph.episodic_buffer import EpisodicBuffer
+from cognigraph.consolidation_graph import LangGraphConsolidator
 
 logger = logging.getLogger("cognigraph.api")
 
@@ -72,6 +73,7 @@ else:
 
 embedder = MockEmbedder(dimension=settings.EMBEDDING_DIMENSION)
 pipeline = ConsolidationPipeline(graph_store, vector_store, extractor, embedder, episodic_buffer)
+workflow_consolidator = LangGraphConsolidator(graph_store, vector_store, extractor, embedder, episodic_buffer)
 retriever = HybridRetriever(graph_store, vector_store)
 
 
@@ -90,6 +92,15 @@ class RetrieveRequest(BaseModel):
     query: str
     k: int = 3
     depth: int = 1
+
+
+class WorkflowConsolidateRequest(BaseModel):
+    """Request model for running the consolidation workflow."""
+    session_id: Optional[str] = None
+    decay_factor: Optional[float] = None
+    pruning_threshold: Optional[float] = None
+    similarity_threshold: Optional[float] = None
+    forgetting_age_days: Optional[float] = None
 
 
 @app.on_event("startup")
@@ -190,6 +201,32 @@ def trigger_consolidation() -> Dict[str, str]:
         return {"status": "success", "message": "Consolidation completed successfully"}
     except Exception as e:
         logger.exception("Failed to run consolidation")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/consolidate/workflow")
+def trigger_workflow_consolidation(request: Optional[WorkflowConsolidateRequest] = None) -> Dict[str, Any]:
+    """Triggers the memory consolidation loop using the LangGraph workflow."""
+    try:
+        req = request or WorkflowConsolidateRequest()
+        result = workflow_consolidator.run_consolidation_workflow(
+            session_id=req.session_id,
+            decay_factor=req.decay_factor,
+            pruning_threshold=req.pruning_threshold,
+            similarity_threshold=req.similarity_threshold,
+            forgetting_age_days=req.forgetting_age_days
+        )
+        # Convert datetime objects to string for JSON serialization
+        if "started_at" in result and isinstance(result["started_at"], datetime):
+            result["started_at"] = result["started_at"].isoformat()
+        if "completed_at" in result and isinstance(result["completed_at"], datetime):
+            result["completed_at"] = result["completed_at"].isoformat()
+        # Remove non-serializable objects like extracted_result and messages
+        result.pop("extracted_result", None)
+        result.pop("messages", None)
+        return result
+    except Exception as e:
+        logger.exception("Failed to run consolidation workflow")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

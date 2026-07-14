@@ -290,6 +290,11 @@ class ConsolidationPipeline:
             entities = self.graph_store.get_all_entities()
             for entity in entities:
                 if self.graph_store.get_degree(entity.id) == 0:
+                    # Check if marked as permanent or important
+                    is_permanent = entity.properties.get("permanent", False)
+                    importance = entity.properties.get("importance", 0.0)
+                    if is_permanent or importance >= 0.8:
+                        continue
                     self.graph_store.remove_entity(entity.id)
                     self.vector_store.delete_vector(entity.id)
                     logger.info("Pruned isolated entity: %s", entity.id)
@@ -339,15 +344,16 @@ class ConsolidationPipeline:
             
             for cluster in clusters:
                 # Sort cluster to find the primary entity
-                # Criteria: 1. Degree (highest first), 2. Description length (longest first), 3. Age (oldest first)
-                def sort_key(ent_id: str) -> Tuple[int, int, float]:
+                # Criteria: 1. Degree (highest first), 2. Description length (longest first), 3. ID length (shortest first), 4. Age (oldest first), 5. Alphabetical ID
+                def sort_key(ent_id: str) -> Tuple[int, int, int, float, str]:
                     ent = self.graph_store.get_entity(ent_id)
                     if not ent:
-                        return (0, 0, 0.0)
+                        return (0, 0, 0, 0.0, "")
                     deg = self.graph_store.get_degree(ent_id)
                     desc_len = len(ent.description) if ent.description else 0
+                    id_len = len(ent_id)
                     created_ts = ent.created_at.timestamp()
-                    return (-deg, -desc_len, created_ts)
+                    return (-deg, -desc_len, id_len, created_ts, ent_id)
                 
                 cluster.sort(key=sort_key)
                 primary_id = cluster[0]
