@@ -13,7 +13,7 @@ from cognigraph.config import settings
 from cognigraph.extractor import Extractor
 from cognigraph.graph_store import GraphStore
 from cognigraph.models import ChatMessage, Entity, ExtractionResult, Relationship
-from cognigraph.vector_store import SimpleVectorStore
+from cognigraph.vector_store import VectorStore
 from cognigraph.episodic_buffer import EpisodicBuffer
 
 logger = logging.getLogger("cognigraph.pipeline")
@@ -150,7 +150,7 @@ class ConsolidationPipeline:
     def __init__(
         self,
         graph_store: GraphStore,
-        vector_store: SimpleVectorStore,
+        vector_store: VectorStore,
         extractor: Extractor,
         embedder: MockEmbedder,
         episodic_buffer: Optional[EpisodicBuffer] = None
@@ -159,7 +159,7 @@ class ConsolidationPipeline:
 
         Args:
             graph_store: The graph storage instance.
-            vector_store: The vector storage instance.
+            vector_store: The vector storage instance conforming to VectorStore protocol.
             extractor: The entity-relationship extractor.
             embedder: The embedding generator.
             episodic_buffer: Optional episodic buffer instance.
@@ -291,10 +291,7 @@ class ConsolidationPipeline:
             for entity in entities:
                 if self.graph_store.get_degree(entity.id) == 0:
                     self.graph_store.remove_entity(entity.id)
-                    if entity.id in self.vector_store.vectors:
-                        del self.vector_store.vectors[entity.id]
-                        if entity.id in self.vector_store.metadata:
-                            del self.vector_store.metadata[entity.id]
+                    self.vector_store.delete_vector(entity.id)
                     logger.info("Pruned isolated entity: %s", entity.id)
 
         # 3. Entity Resolution & Merging
@@ -312,8 +309,8 @@ class ConsolidationPipeline:
                 str_sim = jaro_winkler_similarity(ent1.name, ent2.name)
                 
                 vec_sim = 0.0
-                v1 = self.vector_store.vectors.get(ent1.id)
-                v2 = self.vector_store.vectors.get(ent2.id)
+                v1 = self.vector_store.get_vector(ent1.id)
+                v2 = self.vector_store.get_vector(ent2.id)
                 if v1 is not None and v2 is not None:
                     vec_sim = cosine_similarity(v1, v2)
                 
@@ -447,10 +444,7 @@ class ConsolidationPipeline:
             self.graph_store.merge_entities(primary_id, dup_id, merged_entity)
             
             # Remove duplicate from vector store
-            if dup_id in self.vector_store.vectors:
-                del self.vector_store.vectors[dup_id]
-                if dup_id in self.vector_store.metadata:
-                    del self.vector_store.metadata[dup_id]
+            self.vector_store.delete_vector(dup_id)
                     
         # Update primary vector with new description
         embedding_text = f"{merged_entity.name}: {merged_entity.description}"

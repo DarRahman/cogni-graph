@@ -5,7 +5,7 @@
 
 from datetime import datetime, timedelta
 import pytest
-from cognigraph.models import Entity, Relationship, ChatMessage
+from cognigraph.models import Entity, Relationship
 from cognigraph.graph_store import NetworkXGraphStore
 from cognigraph.vector_store import SimpleVectorStore
 from cognigraph.extractor import RuleBasedExtractor
@@ -126,5 +126,5 @@ def test_consolidation_entity_merging() -> None:
     assert "google" in rel_targets
 
     # Verify vector store is updated
-    assert "alice_smith" not in vector_store.vectors
-    assert "alice" in vector_store.vectors
+    assert vector_store.get_vector("alice_smith") is None
+    assert vector_store.get_vector("alice") is not None

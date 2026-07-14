@@ -39,7 +39,27 @@ else:
     logger.info("Initializing NetworkXGraphStore for API")
     graph_store = NetworkXGraphStore()  # type: ignore[assignment]
 
-vector_store = SimpleVectorStore()
+# Dynamically choose vector store based on configuration
+if settings.VECTOR_STORE_TYPE == "chroma":
+    logger.info("Initializing ChromaVectorStore for API")
+    from cognigraph.vector_store import ChromaVectorStore
+    vector_store = ChromaVectorStore(  # type: ignore[assignment]
+        path=settings.CHROMA_PATH,
+        collection_name=settings.CHROMA_COLLECTION_NAME
+    )
+elif settings.VECTOR_STORE_TYPE == "qdrant":
+    logger.info("Initializing QdrantVectorStore for API")
+    from cognigraph.vector_store import QdrantVectorStore
+    vector_store = QdrantVectorStore(  # type: ignore[assignment]
+        url=settings.QDRANT_URL,
+        api_key=settings.QDRANT_API_KEY,
+        collection_name=settings.QDRANT_COLLECTION_NAME,
+        dimension=settings.EMBEDDING_DIMENSION
+    )
+else:
+    logger.info("Initializing SimpleVectorStore for API")
+    vector_store = SimpleVectorStore()  # type: ignore[assignment]
+
 episodic_buffer = EpisodicBuffer()
 
 # Dynamically choose extractor based on configuration
@@ -191,7 +211,7 @@ def get_status() -> Dict[str, Any]:
             "edges_count": edges_count
         },
         "vector_store": {
-            "vectors_count": len(vector_store.vectors)
+            "vectors_count": vector_store.count()
         },
         "episodic_buffer": {
             "total_messages": len(episodic_buffer.messages),

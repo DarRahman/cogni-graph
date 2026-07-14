@@ -34,7 +34,7 @@ def test_hybrid_retrieval_flow() -> None:
 
     # Verify stores are populated
     assert graph_store.graph.number_of_nodes() >= 3
-    assert len(vector_store.vectors) >= 3
+    assert vector_store.count() >= 3
 
     # Perform retrieval
     query = "Where does Alice work?"

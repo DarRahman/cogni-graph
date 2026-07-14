@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     NEO4J_DATABASE: str = "neo4j"
     USE_NEO4J: bool = False
 
+    # Vector store configuration
+    VECTOR_STORE_TYPE: str = "simple"  # "simple", "chroma", or "qdrant"
+    CHROMA_PATH: str = "./data/chroma"
+    CHROMA_COLLECTION_NAME: str = "cognigraph"
+    QDRANT_URL: str = ":memory:"
+    QDRANT_API_KEY: Optional[str] = None
+    QDRANT_COLLECTION_NAME: str = "cognigraph"
+
     # API configuration
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
