@@ -4,30 +4,28 @@
 """FastAPI application exposing memory read/write endpoints."""
 
 import logging
+from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from cognigraph.config import settings
-from cognigraph.extractor import InstructorExtractor, RuleBasedExtractor
-from cognigraph.graph_store import NetworkXGraphStore
+from cognigraph.extractor import Extractor, InstructorExtractor, RuleBasedExtractor
+from cognigraph.graph_store import GraphStore, NetworkXGraphStore
 from cognigraph.neo4j_store import Neo4jGraphStore
-from cognigraph.models import ChatMessage, ExtractionResult, RetrievalResult, StoredMessage
+from cognigraph.models import ChatMessage, Entity, ExtractionResult, Relationship, RetrievalResult, StoredMessage
 from cognigraph.pipeline import ConsolidationPipeline, MockEmbedder
 from cognigraph.retriever import HybridRetriever
-from cognigraph.vector_store import SimpleVectorStore
+from cognigraph.vector_store import VectorStore, SimpleVectorStore
 from cognigraph.episodic_buffer import EpisodicBuffer
 from cognigraph.consolidation_graph import LangGraphConsolidator
+from cognigraph.visualization import generate_visual_html
 
 logger = logging.getLogger("cognigraph.api")
 
-app = FastAPI(
-    title="CogniGraph API",
-    description="Stateful long-term memory engine for LLM agents using hybrid vector-graph consolidation.",
-    version="0.1.0"
-)
-
 # Initialize components
+graph_store: GraphStore
 if settings.USE_NEO4J:
     logger.info("Initializing Neo4jGraphStore for API")
     graph_store = Neo4jGraphStore(
@@ -38,20 +36,21 @@ if settings.USE_NEO4J:
     )
 else:
     logger.info("Initializing NetworkXGraphStore for API")
-    graph_store = NetworkXGraphStore()  # type: ignore[assignment]
+    graph_store = NetworkXGraphStore()
 
 # Dynamically choose vector store based on configuration
+vector_store: VectorStore
 if settings.VECTOR_STORE_TYPE == "chroma":
     logger.info("Initializing ChromaVectorStore for API")
     from cognigraph.vector_store import ChromaVectorStore
-    vector_store = ChromaVectorStore(  # type: ignore[assignment]
+    vector_store = ChromaVectorStore(
         path=settings.CHROMA_PATH,
         collection_name=settings.CHROMA_COLLECTION_NAME
     )
 elif settings.VECTOR_STORE_TYPE == "qdrant":
     logger.info("Initializing QdrantVectorStore for API")
     from cognigraph.vector_store import QdrantVectorStore
-    vector_store = QdrantVectorStore(  # type: ignore[assignment]
+    vector_store = QdrantVectorStore(
         url=settings.QDRANT_URL,
         api_key=settings.QDRANT_API_KEY,
         collection_name=settings.QDRANT_COLLECTION_NAME,
@@ -59,22 +58,48 @@ elif settings.VECTOR_STORE_TYPE == "qdrant":
     )
 else:
     logger.info("Initializing SimpleVectorStore for API")
-    vector_store = SimpleVectorStore()  # type: ignore[assignment]
+    vector_store = SimpleVectorStore()
 
 episodic_buffer = EpisodicBuffer()
 
 # Dynamically choose extractor based on configuration
+extractor: Extractor
 if settings.OPENAI_API_KEY:
     logger.info("Initializing InstructorExtractor for API")
-    extractor = InstructorExtractor()  # type: ignore[assignment]
+    extractor = InstructorExtractor()
 else:
     logger.warning("COGNIGRAPH_OPENAI_API_KEY not set. Falling back to RuleBasedExtractor.")
-    extractor = RuleBasedExtractor()  # type: ignore[assignment]
+    extractor = RuleBasedExtractor()
 
 embedder = MockEmbedder(dimension=settings.EMBEDDING_DIMENSION)
 pipeline = ConsolidationPipeline(graph_store, vector_store, extractor, embedder, episodic_buffer)
 workflow_consolidator = LangGraphConsolidator(graph_store, vector_store, extractor, embedder, episodic_buffer)
 retriever = HybridRetriever(graph_store, vector_store)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for FastAPI application."""
+    logger.info("Starting up CogniGraph API")
+    graph_store.load_from_disk(settings.GRAPH_DB_PATH)
+    vector_store.load_from_disk(settings.VECTOR_DB_PATH)
+    episodic_buffer.load_from_disk(settings.EPISODIC_DB_PATH)
+    yield
+    logger.info("Shutting down CogniGraph API")
+    graph_store.save_to_disk(settings.GRAPH_DB_PATH)
+    vector_store.save_to_disk(settings.VECTOR_DB_PATH)
+    episodic_buffer.save_to_disk(settings.EPISODIC_DB_PATH)
+    close_fn = getattr(graph_store, "close", None)
+    if close_fn and callable(close_fn):
+        close_fn()
+
+
+app = FastAPI(
+    title="CogniGraph API",
+    description="Stateful long-term memory engine for LLM agents using hybrid vector-graph consolidation.",
+    version="0.1.0",
+    lifespan=lifespan
+)
 
 
 class IngestRequest(BaseModel):
@@ -103,33 +128,13 @@ class WorkflowConsolidateRequest(BaseModel):
     forgetting_age_days: Optional[float] = None
 
 
-@app.on_event("startup")
-def startup_event() -> None:
-    """Loads stores from disk on startup if files exist."""
-    logger.info("Starting up CogniGraph API")
-    graph_store.load_from_disk(settings.GRAPH_DB_PATH)
-    vector_store.load_from_disk(settings.VECTOR_DB_PATH)
-    episodic_buffer.load_from_disk(settings.EPISODIC_DB_PATH)
-
-
-@app.on_event("shutdown")
-def shutdown_event() -> None:
-    """Saves stores to disk on shutdown."""
-    logger.info("Shutting down CogniGraph API")
-    graph_store.save_to_disk(settings.GRAPH_DB_PATH)
-    vector_store.save_to_disk(settings.VECTOR_DB_PATH)
-    episodic_buffer.save_to_disk(settings.EPISODIC_DB_PATH)
-    if hasattr(graph_store, "close"):
-        graph_store.close()  # type: ignore[attr-defined]
-
-
 @app.post("/ingest", response_model=ExtractionResult)
 def ingest_messages(request: IngestRequest) -> ExtractionResult:
     """Ingests chat messages, extracts facts, and updates stores."""
     try:
         result = pipeline.ingest_and_process(request.messages)
         return result
-    except Exception as e:
+    except Exception as e: 
         logger.exception("Failed to ingest messages")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
@@ -255,6 +260,126 @@ def get_status() -> Dict[str, Any]:
             "unprocessed_messages": unprocessed_count
         }
     }
+
+
+@app.get("/visualize", response_class=HTMLResponse)
+def get_visualization() -> HTMLResponse:
+    """Returns an interactive HTML visualization of the knowledge graph."""
+    try:
+        html_content = generate_visual_html(graph_store)
+        return HTMLResponse(content=html_content, status_code=200)
+    except Exception as e:
+        logger.exception("Failed to generate visualization")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/entities", response_model=List[Entity])
+def get_entities() -> List[Entity]:
+    """Retrieves all entities from the graph store."""
+    try:
+        return graph_store.get_all_entities()
+    except Exception as e:
+        logger.exception("Failed to retrieve entities")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/entities/{entity_id}", response_model=Entity)
+def get_entity(entity_id: str) -> Entity:
+    """Retrieves a specific entity by ID."""
+    try:
+        entity = graph_store.get_entity(entity_id)
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Entity '{entity_id}' not found")
+        return entity
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to retrieve entity")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/entities", response_model=Entity)
+def add_entity(entity: Entity) -> Entity:
+    """Adds or updates an entity in the graph and vector stores."""
+    try:
+        graph_store.add_entity(entity)
+        # Generate embedding and add to vector store
+        embedding_text = f"{entity.name}: {entity.description}"
+        vector = embedder.embed_text(embedding_text)
+        vector_store.add_vector(
+            vector_id=entity.id,
+            vector=vector,
+            metadata={"name": entity.name, "type": entity.type}
+        )
+        return entity
+    except Exception as e:
+        logger.exception("Failed to add entity")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.delete("/entities/{entity_id}")
+def delete_entity(entity_id: str) -> Dict[str, str]:
+    """Deletes an entity and its connected relationships from the graph and vector stores."""
+    try:
+        entity = graph_store.get_entity(entity_id)
+        if not entity:
+            raise HTTPException(status_code=404, detail=f"Entity '{entity_id}' not found")
+        
+        # Remove all relationships connected to it
+        neighbors = graph_store.get_neighbors(entity_id)
+        for _, rel in neighbors:
+            graph_store.remove_relationship(rel.source, rel.target, rel.type)
+            
+        graph_store.remove_entity(entity_id)
+        vector_store.delete_vector(entity_id)
+        return {"status": "success", "message": f"Entity '{entity_id}' deleted successfully"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete entity")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/relationships", response_model=List[Relationship])
+def get_relationships() -> List[Relationship]:
+    """Retrieves all relationships from the graph store."""
+    try:
+        return graph_store.get_all_relationships()
+    except Exception as e:
+        logger.exception("Failed to retrieve relationships")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/relationships", response_model=Relationship)
+def add_relationship(relationship: Relationship) -> Relationship:
+    """Adds or updates a relationship in the graph store."""
+    try:
+        # Ensure source and target entities exist
+        if not graph_store.get_entity(relationship.source):
+            graph_store.add_entity(Entity(id=relationship.source, name=relationship.source.capitalize(), type="Concept"))
+        if not graph_store.get_entity(relationship.target):
+            graph_store.add_entity(Entity(id=relationship.target, name=relationship.target.capitalize(), type="Concept"))
+            
+        graph_store.add_relationship(relationship)
+        return relationship
+    except Exception as e:
+        logger.exception("Failed to add relationship")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.delete("/relationships")
+def delete_relationship(
+    source: str = Query(..., description="Source entity ID"),
+    target: str = Query(..., description="Target entity ID"),
+    type: str = Query(..., description="Relationship type")
+) -> Dict[str, str]:
+    """Deletes a specific relationship from the graph store."""
+    try:
+        graph_store.remove_relationship(source, target, type)
+        return {"status": "success", "message": f"Relationship '{source} -[{type}]-> {target}' deleted successfully"}
+    except Exception as e:
+        logger.exception("Failed to delete relationship")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 def main() -> None:

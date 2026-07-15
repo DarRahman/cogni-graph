@@ -37,7 +37,10 @@ def test_api_ingest_and_retrieve() -> None:
     data = response.json()
     assert len(data["entities"]) >= 3
 
-    # Retrieve
+
+def test_api_retrieve() -> None:
+    """Tests the retrieve endpoint."""
+    client = TestClient(app)
     retrieve_payload = {
         "query": "Where does David work?",
         "k": 2,
@@ -48,7 +51,10 @@ def test_api_ingest_and_retrieve() -> None:
     data = response.json()
     assert len(data["entities"]) > 0
 
-    # Consolidate
+
+def test_api_consolidate() -> None:
+    """Tests the consolidate endpoint."""
+    client = TestClient(app)
     response = client.post("/consolidate")
     assert response.status_code == 200
     assert response.json()["status"] == "success"
@@ -74,7 +80,7 @@ def test_api_episodic_endpoints() -> None:
     data = response.json()
     assert "message_ids" in data
     assert len(data["message_ids"]) == 1
-    msg_id = data["message_ids"][0]
+    msg_id = data["message_ids"].copy()[0]
 
     # Get episodes (unprocessed)
     response = client.get("/episodes?unprocessed_only=true")
@@ -133,3 +139,74 @@ def test_api_workflow_consolidation() -> None:
     assert data["forgotten_entities_count"] >= 0
     assert "started_at" in data
     assert "completed_at" in data
+
+
+def test_api_crud_endpoints() -> None:
+    """Tests the CRUD endpoints for entities and relationships."""
+    client = TestClient(app)
+
+    # 1. Add Entity
+    entity_payload = {
+        "id": "test_entity",
+        "name": "Test Entity",
+        "type": "Concept",
+        "description": "A test entity for CRUD",
+        "properties": {"key": "value"}
+    }
+    response = client.post("/entities", json=entity_payload)
+    assert response.status_code == 200
+    assert response.json()["id"] == "test_entity"
+
+    # 2. Get Entity
+    response = client.get("/entities/test_entity")
+    assert response.status_code == 200
+    assert response.json()["name"] == "Test Entity"
+
+    # 3. Get All Entities
+    response = client.get("/entities")
+    assert response.status_code == 200
+    entities = response.json()
+    assert len(entities) >= 1
+    assert any(e["id"] == "test_entity" for e in entities)
+
+    # 4. Add Relationship
+    rel_payload = {
+        "source": "test_entity",
+        "target": "other_entity",
+        "type": "TEST_REL",
+        "description": "A test relationship",
+        "weight": 1.0
+    }
+    response = client.post("/relationships", json=rel_payload)
+    assert response.status_code == 200
+    assert response.json()["source"] == "test_entity"
+
+    # 5. Get All Relationships
+    response = client.get("/relationships")
+    assert response.status_code == 200
+    rels = response.json()
+    assert len(rels) >= 1
+    assert any(r["source"] == "test_entity" and r["target"] == "other_entity" for r in rels)
+
+    # 6. Delete Relationship
+    response = client.delete("/relationships?source=test_entity&target=other_entity&type=TEST_REL")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    # 7. Delete Entity
+    response = client.delete("/entities/test_entity")
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+
+    # Verify entity is deleted
+    response = client.get("/entities/test_entity")
+    assert response.status_code == 404
+
+
+def test_api_visualize_endpoint() -> None:
+    """Tests the /visualize endpoint."""
+    client = TestClient(app)
+    response = client.get("/visualize")
+    assert response.status_code == 200
+    assert "text/html" in response.headers["content-type"]
+    assert "<!DOCTYPE html>" in response.text

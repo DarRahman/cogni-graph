@@ -5,6 +5,7 @@
 
 import argparse
 import logging
+import os
 import sys
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -14,7 +15,7 @@ from cognigraph.graph_store import NetworkXGraphStore, GraphStore
 from cognigraph.neo4j_store import Neo4jGraphStore
 from cognigraph.vector_store import SimpleVectorStore, VectorStore
 from cognigraph.episodic_buffer import EpisodicBuffer
-from cognigraph.extractor import InstructorExtractor, RuleBasedExtractor
+from cognigraph.extractor import Extractor, InstructorExtractor, RuleBasedExtractor
 from cognigraph.pipeline import MockEmbedder
 from cognigraph.consolidation_graph import LangGraphConsolidator
 from cognigraph.retriever import HybridRetriever
@@ -44,12 +45,13 @@ def setup_logging(verbose: bool = False) -> None:
     root_logger.addHandler(handler)
 
 
-def init_components() -> Tuple[GraphStore, VectorStore, EpisodicBuffer, Any, MockEmbedder]:
+def init_components() -> Tuple[GraphStore, VectorStore, EpisodicBuffer, Extractor, MockEmbedder]:
     """Initializes CogniGraph components based on settings.
 
     Returns:
         A tuple containing (graph_store, vector_store, episodic_buffer, extractor, embedder).
     """
+    graph_store: GraphStore
     if settings.USE_NEO4J:
         graph_store = Neo4jGraphStore(
             uri=settings.NEO4J_URI,
@@ -58,31 +60,33 @@ def init_components() -> Tuple[GraphStore, VectorStore, EpisodicBuffer, Any, Moc
             database=settings.NEO4J_DATABASE
         )
     else:
-        graph_store = NetworkXGraphStore()  # type: ignore[assignment]
+        graph_store = NetworkXGraphStore()
 
+    vector_store: VectorStore
     if settings.VECTOR_STORE_TYPE == "chroma":
         from cognigraph.vector_store import ChromaVectorStore
-        vector_store = ChromaVectorStore(  # type: ignore[assignment]
+        vector_store = ChromaVectorStore(
             path=settings.CHROMA_PATH,
             collection_name=settings.CHROMA_COLLECTION_NAME
         )
     elif settings.VECTOR_STORE_TYPE == "qdrant":
         from cognigraph.vector_store import QdrantVectorStore
-        vector_store = QdrantVectorStore(  # type: ignore[assignment]
+        vector_store = QdrantVectorStore(
             url=settings.QDRANT_URL,
             api_key=settings.QDRANT_API_KEY,
             collection_name=settings.QDRANT_COLLECTION_NAME,
             dimension=settings.EMBEDDING_DIMENSION
         )
     else:
-        vector_store = SimpleVectorStore()  # type: ignore[assignment]
+        vector_store = SimpleVectorStore()
 
     episodic_buffer = EpisodicBuffer()
 
+    extractor: Extractor
     if settings.OPENAI_API_KEY:
-        extractor = InstructorExtractor()  # type: ignore[assignment]
+        extractor = InstructorExtractor()
     else:
-        extractor = RuleBasedExtractor()  # type: ignore[assignment]
+        extractor = RuleBasedExtractor()
 
     embedder = MockEmbedder(dimension=settings.EMBEDDING_DIMENSION)
 
@@ -184,7 +188,7 @@ def cmd_query(args: argparse.Namespace, graph_store: GraphStore, vector_store: V
             logger.info(f"  Context: {rel.description}")
 
 
-def cmd_consolidate(args: argparse.Namespace, graph_store: GraphStore, vector_store: VectorStore, episodic_buffer: EpisodicBuffer, extractor: Any, embedder: MockEmbedder) -> None:
+def cmd_consolidate(args: argparse.Namespace, graph_store: GraphStore, vector_store: VectorStore, episodic_buffer: EpisodicBuffer, extractor: Extractor, embedder: MockEmbedder) -> None:
     """Handles the 'consolidate' CLI command.
 
     Args:
@@ -279,6 +283,20 @@ def cmd_visualize(args: argparse.Namespace, graph_store: GraphStore, vector_stor
     """
     load_stores(graph_store, vector_store, episodic_buffer)
 
+    if getattr(args, "format", "text") == "html":
+        from cognigraph.visualization import generate_visual_html
+        output_path = getattr(args, "output", "cognigraph_vis.html")
+        logger.info("Generating interactive HTML visualization...")
+        try:
+            html_content = generate_visual_html(graph_store)
+            with open(output_path, "w", encoding="utf-8") as f:
+                f.write(html_content)
+            logger.info(f"Visualization saved successfully to: {os.path.abspath(output_path)}")
+            logger.info("Open this file in a web browser to view the interactive graph.")
+        except Exception as e:
+            logger.error(f"Failed to generate HTML visualization: {e}")
+        return
+
     entities = graph_store.get_all_entities()
     relationships = graph_store.get_all_relationships()
 
@@ -353,7 +371,15 @@ def main() -> None:
     buffer_subparsers.add_parser("clear", help="Clear processed messages from buffer")
 
     # Visualize command
-    subparsers.add_parser("visualize", help="Visualize the knowledge graph")
+    visualize_parser = subparsers.add_parser("visualize", help="Visualize the knowledge graph")
+    visualize_parser.add_argument(
+        "-f", "--format", type=str, choices=["text", "html"], default="text",
+        help="Visualization format: 'text' (console output) or 'html' (interactive browser visualization)"
+    )
+    visualize_parser.add_argument(
+        "-o", "--output", type=str, default="cognigraph_vis.html",
+        help="Output file path for HTML visualization (default: cognigraph_vis.html)"
+    )
 
     args = parser.parse_args()
     setup_logging(args.verbose)
@@ -372,8 +398,9 @@ def main() -> None:
         elif args.command == "visualize":
             cmd_visualize(args, graph_store, vector_store, episodic_buffer)
 
-        if hasattr(graph_store, "close"):
-            graph_store.close()  # type: ignore[attr-defined]
+        close_fn = getattr(graph_store, "close", None)
+        if close_fn and callable(close_fn):
+            close_fn()
     except Exception as e:
         logger.exception("CLI command failed")
         sys.exit(1)

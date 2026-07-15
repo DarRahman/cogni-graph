@@ -30,4 +30,5 @@ __all__ = [
     "episodic_buffer",
     "consolidation_graph",
     "cli",
+    "visualization",
 ]

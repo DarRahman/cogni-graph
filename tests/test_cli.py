@@ -4,7 +4,7 @@
 """Unit tests for the CogniGraph CLI tool."""
 
 import argparse
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, mock_open
 import pytest
 
 from cognigraph.cli import (
@@ -18,7 +18,7 @@ from cognigraph.cli import (
 from cognigraph.graph_store import NetworkXGraphStore
 from cognigraph.vector_store import SimpleVectorStore
 from cognigraph.episodic_buffer import EpisodicBuffer
-from cognigraph.models import Entity, Relationship, ChatMessage, StoredMessage
+from cognigraph.models import Entity, Relationship, StoredMessage
 from cognigraph.extractor import RuleBasedExtractor
 from cognigraph.pipeline import MockEmbedder
 
@@ -168,8 +168,8 @@ def test_cmd_buffer_clear(mock_save: MagicMock, mock_load: MagicMock, mock_store
 
 
 @patch("cognigraph.cli.load_stores")
-def test_cmd_visualize(mock_load: MagicMock, mock_stores: tuple[MagicMock, MagicMock, MagicMock]) -> None:
-    """Tests the visualize CLI command."""
+def test_cmd_visualize_text(mock_load: MagicMock, mock_stores: tuple[MagicMock, MagicMock, MagicMock]) -> None:
+    """Tests the visualize CLI command in text format."""
     graph_store, vector_store, episodic_buffer = mock_stores
     graph_store.get_all_entities.return_value = [
         Entity(id="alice", name="Alice", type="Person")
@@ -179,12 +179,28 @@ def test_cmd_visualize(mock_load: MagicMock, mock_stores: tuple[MagicMock, Magic
     ]
     graph_store.get_degree.return_value = 1
 
-    args = argparse.Namespace()
+    args = argparse.Namespace(format="text")
     cmd_visualize(args, graph_store, vector_store, episodic_buffer)
 
     mock_load.assert_called_once_with(graph_store, vector_store, episodic_buffer)
     graph_store.get_all_entities.assert_called_once()
     graph_store.get_all_relationships.assert_called_once()
+
+
+@patch("cognigraph.cli.load_stores")
+@patch("builtins.open", new_callable=mock_open)
+@patch("cognigraph.visualization.generate_visual_html")
+def test_cmd_visualize_html(mock_gen_html: MagicMock, mock_open_file: MagicMock, mock_load: MagicMock, mock_stores: tuple[MagicMock, MagicMock, MagicMock]) -> None:
+    """Tests the visualize CLI command in HTML format."""
+    graph_store, vector_store, episodic_buffer = mock_stores
+    mock_gen_html.return_value = "<html></html>"
+
+    args = argparse.Namespace(format="html", output="test_vis.html")
+    cmd_visualize(args, graph_store, vector_store, episodic_buffer)
+
+    mock_load.assert_called_once_with(graph_store, vector_store, episodic_buffer)
+    mock_gen_html.assert_called_once_with(graph_store)
+    mock_open_file.assert_called_once_with("test_vis.html", "w", encoding="utf-8")
 
 
 @patch("cognigraph.cli.settings")
